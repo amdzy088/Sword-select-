@@ -1,0 +1,464 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local lp = Players.LocalPlayer
+
+-- Konfigurasi
+getgenv().AutoKillConfig = {
+    Enabled = false,
+    TargetPlayers = {},
+    Size = Vector3.new(10, 10, 10),
+    DeathCheck = true,
+    MaxDistance = 7000,
+    MustSelectTarget = true,
+    Minimized = false,
+    ClickSelectMode = false
+}
+
+-- Hapus koneksi sebelumnya jika ada
+if getgenv().AutoKillConnections then
+    for _, conn in ipairs(getgenv().AutoKillConnections) do
+        conn:Disconnect()
+    end
+end
+getgenv().AutoKillConnections = {}
+
+-- Fungsi utilitas
+local function getChar(plr)
+    return plr and plr.Character or lp.Character
+end
+
+local function getHumanoid(plr)
+    local char = plr:IsA("Model") and plr or getChar(plr)
+    return char and char:FindFirstChildWhichIsA("Humanoid")
+end
+
+local function isAlive(humanoid)
+    return humanoid and humanoid.Health > 0
+end
+
+local function getTouchInterest(tool)
+    return tool and tool:FindFirstChildWhichIsA("TouchTransmitter", true)
+end
+
+local function attack(tool, touchPart, target)
+    if tool:IsDescendantOf(workspace) then
+        tool:Activate()
+        firetouchinterest(touchPart, target, 1)
+        firetouchinterest(touchPart, target, 0)
+    end
+end
+
+-- Fungsi untuk highlight player
+local function highlightPlayer(player, duration)
+    local character = player.Character
+    if not character then return end
+
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "AutoKillHighlight"
+    highlight.FillColor = Color3.fromRGB(0, 255, 0)
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    highlight.Parent = character
+
+    task.delay(duration, function()
+        if highlight then
+            highlight:Destroy()
+        end
+    end)
+end
+
+-- Buat GUI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AutoKillGUI"
+screenGui.Parent = game:GetService("CoreGui")
+screenGui.ResetOnSpawn = false
+
+-- Main Window (Merah)
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 300, 0, 200)
+mainFrame.Position = UDim2.new(0.5, -150, 0.5, -100)
+mainFrame.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+mainFrame.BorderSizePixel = 2
+mainFrame.BorderColor3 = Color3.fromRGB(255, 255, 255)
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
+
+local title = Instance.new("TextLabel")
+title.Name = "Title"
+title.Text = "Auto Kill Player"
+title.Size = UDim2.new(1, 0, 0, 30)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundColor3 = Color3.fromRGB(100, 0, 0)
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.GothamBold
+title.Parent = mainFrame
+
+local minimizeButton = Instance.new("TextButton")
+minimizeButton.Name = "MinimizeButton"
+minimizeButton.Text = "_"
+minimizeButton.Size = UDim2.new(0, 30, 0, 30)
+minimizeButton.Position = UDim2.new(1, -60, 0, 0)
+minimizeButton.BackgroundColor3 = Color3.fromRGB(100, 0, 0)
+minimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+minimizeButton.Font = Enum.Font.GothamBold
+minimizeButton.Parent = mainFrame
+
+-- Tombol Click Select Mode (Biru)
+local clickSelectButton = Instance.new("TextButton")
+clickSelectButton.Name = "ClickSelectButton"
+clickSelectButton.Text = "🔍"
+clickSelectButton.Size = UDim2.new(0, 30, 0, 30)
+clickSelectButton.Position = UDim2.new(1, -30, 0, 0)
+clickSelectButton.BackgroundColor3 = Color3.fromRGB(0, 0, 150)
+clickSelectButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+clickSelectButton.Font = Enum.Font.GothamBold
+clickSelectButton.Visible = not getgenv().AutoKillConfig.Minimized
+clickSelectButton.Parent = mainFrame
+
+local toggleButton = Instance.new("TextButton")
+toggleButton.Name = "ToggleButton"
+toggleButton.Text = "Aktifkan Auto Kill"
+toggleButton.Size = UDim2.new(0.9, 0, 0, 30)
+toggleButton.Position = UDim2.new(0.05, 0, 0.2, 0)
+toggleButton.BackgroundColor3 = Color3.fromRGB(100, 0, 0)
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.Font = Enum.Font.Gotham
+toggleButton.Visible = not getgenv().AutoKillConfig.Minimized
+toggleButton.Parent = mainFrame
+
+local openListButton = Instance.new("TextButton")
+openListButton.Name = "OpenListButton"
+openListButton.Text = "Buka Daftar Player"
+openListButton.Size = UDim2.new(0.9, 0, 0, 30)
+openListButton.Position = UDim2.new(0.05, 0, 0.4, 0)
+openListButton.BackgroundColor3 = Color3.fromRGB(100, 0, 0)
+openListButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+openListButton.Font = Enum.Font.Gotham
+openListButton.Visible = not getgenv().AutoKillConfig.Minimized
+openListButton.Parent = mainFrame
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Name = "StatusLabel"
+statusLabel.Text = "Status: Mati | Pilih target dulu"
+statusLabel.Size = UDim2.new(0.9, 0, 0, 20)
+statusLabel.Position = UDim2.new(0.05, 0, 0.65, 0)
+statusLabel.BackgroundTransparency = 1
+statusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Visible = not getgenv().AutoKillConfig.Minimized
+statusLabel.Parent = mainFrame
+
+-- Tambahkan slider untuk jarak
+local distanceSlider = Instance.new("Frame")
+distanceSlider.Name = "DistanceSlider"
+distanceSlider.Size = UDim2.new(0.9, 0, 0, 30)
+distanceSlider.Position = UDim2.new(0.05, 0, 0.8, 0)
+distanceSlider.BackgroundTransparency = 1
+distanceSlider.Visible = not getgenv().AutoKillConfig.Minimized
+distanceSlider.Parent = mainFrame
+
+local distanceText = Instance.new("TextLabel")
+distanceText.Name = "DistanceText"
+distanceText.Text = "Jarak: 7000"
+distanceText.Size = UDim2.new(0.4, 0, 1, 0)
+distanceText.Position = UDim2.new(0, 0, 0, 0)
+distanceText.BackgroundTransparency = 1
+distanceText.TextColor3 = Color3.fromRGB(255, 255, 255)
+distanceText.Font = Enum.Font.Gotham
+distanceText.TextXAlignment = Enum.TextXAlignment.Left
+distanceText.Parent = distanceSlider
+
+local slider = Instance.new("TextBox")
+slider.Name = "Slider"
+slider.Text = "7000"
+slider.Size = UDim2.new(0.5, 0, 1, 0)
+slider.Position = UDim2.new(0.5, 0, 0, 0)
+slider.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
+slider.TextColor3 = Color3.fromRGB(255, 255, 255)
+slider.Font = Enum.Font.Gotham
+slider.Parent = distanceSlider
+
+-- Player List Window (Hitam)
+local listFrame = Instance.new("Frame")
+listFrame.Name = "ListFrame"
+listFrame.Size = UDim2.new(0, 250, 0, 300)
+listFrame.Position = UDim2.new(0.5, -125, 0.5, -150)
+listFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+listFrame.BorderSizePixel = 2
+listFrame.BorderColor3 = Color3.fromRGB(255, 255, 255)
+listFrame.Active = true
+listFrame.Draggable = true
+listFrame.Visible = false
+listFrame.Parent = screenGui
+
+local listTitle = Instance.new("TextLabel")
+listTitle.Name = "ListTitle"
+listTitle.Text = "Daftar Player (Pilih target)"
+listTitle.Size = UDim2.new(1, 0, 0, 30)
+listTitle.Position = UDim2.new(0, 0, 0, 0)
+listTitle.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+listTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+listTitle.Font = Enum.Font.GothamBold
+listTitle.Parent = listFrame
+
+local closeListButton = Instance.new("TextButton")
+closeListButton.Name = "CloseListButton"
+closeListButton.Text = "X"
+closeListButton.Size = UDim2.new(0, 30, 0, 30)
+closeListButton.Position = UDim2.new(1, -30, 0, 0)
+closeListButton.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+closeListButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeListButton.Font = Enum.Font.GothamBold
+closeListButton.Parent = listFrame
+
+local scrollFrame = Instance.new("ScrollingFrame")
+scrollFrame.Name = "ScrollFrame"
+scrollFrame.Size = UDim2.new(1, -10, 1, -40)
+scrollFrame.Position = UDim2.new(0, 5, 0, 35)
+scrollFrame.BackgroundTransparency = 1
+scrollFrame.ScrollBarThickness = 5
+scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+scrollFrame.Parent = listFrame
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.Name = "ListLayout"
+listLayout.Padding = UDim.new(0, 5)
+listLayout.Parent = scrollFrame
+
+-- Variabel untuk menyimpan tombol player
+local playerButtons = {}
+
+-- Fungsi untuk toggle minimize
+local function toggleMinimize()
+    getgenv().AutoKillConfig.Minimized = not getgenv().AutoKillConfig.Minimized
+
+    if getgenv().AutoKillConfig.Minimized then
+        mainFrame.Size = UDim2.new(0, 300, 0, 30)
+        minimizeButton.Text = "□"
+        toggleButton.Visible = false
+        openListButton.Visible = false
+        statusLabel.Visible = false
+        distanceSlider.Visible = false
+        clickSelectButton.Visible = false
+    else
+        mainFrame.Size = UDim2.new(0, 300, 0, 200)
+        minimizeButton.Text = "_"
+        toggleButton.Visible = true
+        openListButton.Visible = true
+        statusLabel.Visible = true
+        distanceSlider.Visible = true
+        clickSelectButton.Visible = true
+    end
+end
+
+-- Fungsi untuk memperbarui daftar player
+local function updatePlayerList()
+    for _, child in ipairs(scrollFrame:GetChildren()) do
+        if child:IsA("TextButton") then
+            child:Destroy()
+        end
+    end
+
+    local players = Players:GetPlayers()
+    table.sort(players, function(a, b)
+        return a.Name < b.Name
+    end)
+
+    for i, player in ipairs(players) do
+        if player ~= lp then
+            local playerButton = Instance.new("TextButton")
+            playerButton.Name = player.Name
+            playerButton.Text = player.Name
+            playerButton.Size = UDim2.new(1, -10, 0, 30)
+            playerButton.BackgroundColor3 = table.find(getgenv().AutoKillConfig.TargetPlayers, player.Name) and Color3.fromRGB(150, 0, 0) or Color3.fromRGB(50, 50, 50)
+            playerButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+            playerButton.Font = Enum.Font.Gotham
+            playerButton.TextXAlignment = Enum.TextXAlignment.Left
+            playerButton.Parent = scrollFrame
+            
+            playerButton.MouseButton1Click:Connect(function()
+                if table.find(getgenv().AutoKillConfig.TargetPlayers, player.Name) then
+                    table.remove(getgenv().AutoKillConfig.TargetPlayers, table.find(getgenv().AutoKillConfig.TargetPlayers, player.Name))
+                    playerButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+                else
+                    table.insert(getgenv().AutoKillConfig.TargetPlayers, player.Name)
+                    playerButton.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+                end
+                
+                if #getgenv().AutoKillConfig.TargetPlayers > 0 then
+                    statusLabel.Text = "Status: " .. (getgenv().AutoKillConfig.Enabled and "Hidup" or "Mati") .. " | " .. #getgenv().AutoKillConfig.TargetPlayers .. " target"
+                else
+                    statusLabel.Text = "Status: " .. (getgenv().AutoKillConfig.Enabled and "Hidup" or "Mati") .. " | Pilih target dulu"
+                end
+            end)
+        end
+    end
+
+    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, #players * 35)
+end
+
+-- Fungsi untuk menangani klik player
+local function handlePlayerClick(player)
+    if not getgenv().AutoKillConfig.ClickSelectMode then return end
+    
+    -- Highlight player selama 3 detik
+    highlightPlayer(player, 3)
+    
+    -- Tambahkan ke daftar target jika belum ada
+    if not table.find(getgenv().AutoKillConfig.TargetPlayers, player.Name) then
+        table.insert(getgenv().AutoKillConfig.TargetPlayers, player.Name)
+        updatePlayerList()
+        
+        if #getgenv().AutoKillConfig.TargetPlayers > 0 then
+            statusLabel.Text = "Status: " .. (getgenv().AutoKillConfig.Enabled and "Hidup" or "Mati") .. " | " .. #getgenv().AutoKillConfig.TargetPlayers .. " target"
+        end
+    end
+end
+
+-- Koneksi tombol
+table.insert(getgenv().AutoKillConnections, minimizeButton.MouseButton1Click:Connect(function()
+    toggleMinimize()
+end))
+
+-- Koneksi untuk click select mode
+table.insert(getgenv().AutoKillConnections, clickSelectButton.MouseButton1Click:Connect(function()
+    getgenv().AutoKillConfig.ClickSelectMode = not getgenv().AutoKillConfig.ClickSelectMode
+    clickSelectButton.BackgroundColor3 = getgenv().AutoKillConfig.ClickSelectMode and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(0, 0, 150)
+    
+    if getgenv().AutoKillConfig.ClickSelectMode then
+        statusLabel.Text = "Mode Pilih Klik: Aktif - Klik player di game"
+    else
+        statusLabel.Text = "Status: " .. (getgenv().AutoKillConfig.Enabled and "Hidup" or "Mati") .. " | " .. (#getgenv().AutoKillConfig.TargetPlayers > 0 and #getgenv().AutoKillConfig.TargetPlayers .. " target" or "Pilih target dulu")
+    end
+end))
+
+table.insert(getgenv().AutoKillConnections, toggleButton.MouseButton1Click:Connect(function()
+    if getgenv().AutoKillConfig.MustSelectTarget and #getgenv().AutoKillConfig.TargetPlayers == 0 then
+        statusLabel.Text = "Pilih target dulu!"
+        task.wait(1)
+        statusLabel.Text = "Status: Mati | Pilih target dulu"
+        return
+    end
+
+    getgenv().AutoKillConfig.Enabled = not getgenv().AutoKillConfig.Enabled
+    toggleButton.Text = getgenv().AutoKillConfig.Enabled and "Nonaktifkan Auto Kill" or "Aktifkan Auto Kill"
+
+    if #getgenv().AutoKillConfig.TargetPlayers > 0 then
+        statusLabel.Text = "Status: " .. (getgenv().AutoKillConfig.Enabled and "Hidup" or "Mati") .. " | " .. #getgenv().AutoKillConfig.TargetPlayers .. " target"
+    else
+        statusLabel.Text = "Status: " .. (getgenv().AutoKillConfig.Enabled and "Hidup" or "Mati") .. " | Pilih target dulu"
+    end
+end))
+
+table.insert(getgenv().AutoKillConnections, openListButton.MouseButton1Click:Connect(function()
+    listFrame.Visible = not listFrame.Visible
+    if listFrame.Visible then
+        updatePlayerList()
+    end
+end))
+
+table.insert(getgenv().AutoKillConnections, closeListButton.MouseButton1Click:Connect(function()
+    listFrame.Visible = false
+end))
+
+-- Koneksi untuk klik player di game
+table.insert(getgenv().AutoKillConnections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not getgenv().AutoKillConfig.ClickSelectMode or gameProcessed then return end
+    
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        local mouse = lp:GetMouse()
+        local target = mouse.Target
+        if target then
+            local model = target:FindFirstAncestorOfClass("Model")
+            if model then
+                local player = Players:GetPlayerFromCharacter(model)
+                if player and player ~= lp then
+                    handlePlayerClick(player)
+                end
+            end
+        end
+    end
+end))
+
+-- Koneksi slider jarak
+table.insert(getgenv().AutoKillConnections, slider.FocusLost:Connect(function()
+    local num = tonumber(slider.Text)
+    if num then
+        num = math.clamp(num, 1, 10000)
+        getgenv().AutoKillConfig.MaxDistance = num
+        slider.Text = tostring(num)
+        distanceText.Text = "Jarak: " .. num
+    else
+        slider.Text = tostring(getgenv().AutoKillConfig.MaxDistance)
+    end
+end))
+
+-- Fungsi utama auto kill
+table.insert(getgenv().AutoKillConnections, RunService.Heartbeat:Connect(function()
+    if not getgenv().AutoKillConfig.Enabled then return end
+    if getgenv().AutoKillConfig.MustSelectTarget and #getgenv().AutoKillConfig.TargetPlayers == 0 then return end
+
+    local char = getChar()
+    local humanoid = getHumanoid(char)
+
+    if isAlive(humanoid) then
+        local tool = char and char:FindFirstChildWhichIsA("Tool")
+        local touchInterest = tool and getTouchInterest(tool)
+        
+        if touchInterest then
+            local touchPart = touchInterest.Parent
+            
+            for _, playerName in ipairs(getgenv().AutoKillConfig.TargetPlayers) do
+                local player = Players:FindFirstChild(playerName)
+                if player then
+                    local targetChar = getChar(player)
+                    if targetChar and (targetChar:GetPivot().Position - char:GetPivot().Position).Magnitude <= getgenv().AutoKillConfig.MaxDistance then
+                        if not getgenv().AutoKillConfig.DeathCheck or isAlive(getHumanoid(targetChar)) then
+                            for _, part in ipairs(targetChar:GetDescendants()) do
+                                if part:IsA("BasePart") then
+                                    attack(tool, touchPart, part)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end))
+
+-- Update daftar player ketika ada perubahan
+table.insert(getgenv().AutoKillConnections, Players.PlayerAdded:Connect(function(player)
+    updatePlayerList()
+    if #getgenv().AutoKillConfig.TargetPlayers > 0 then
+        statusLabel.Text = "Status: " .. (getgenv().AutoKillConfig.Enabled and "Hidup" or "Mati") .. " | " .. #getgenv().AutoKillConfig.TargetPlayers .. " target"
+    end
+end))
+
+table.insert(getgenv().AutoKillConnections, Players.PlayerRemoving:Connect(function(player)
+    if table.find(getgenv().AutoKillConfig.TargetPlayers, player.Name) then
+        table.remove(getgenv().AutoKillConfig.TargetPlayers, table.find(getgenv().AutoKillConfig.TargetPlayers, player.Name))
+    end
+
+    updatePlayerList()
+    if #getgenv().AutoKillConfig.TargetPlayers > 0 then
+        statusLabel.Text = "Status: " .. (getgenv().AutoKillConfig.Enabled and "Hidup" or "Mati") .. " | " .. #getgenv().AutoKillConfig.TargetPlayers .. " target"
+    else
+        statusLabel.Text = "Status: " .. (getgenv().AutoKillConfig.Enabled and "Hidup" or "Mati") .. " | Pilih target dulu"
+    end
+end))
+
+-- Inisialisasi pertama
+updatePlayerList()
+statusLabel.Text = "Status: Mati | Pilih target dulu"
+toggleButton.Text = "Aktifkan Auto Kill"
+distanceText.Text = "Jarak: " .. getgenv().AutoKillConfig.MaxDistance
+
+-- Jika awalnya minimized
+if getgenv().AutoKillConfig.Minimized then
+    toggleMinimize()
+end
